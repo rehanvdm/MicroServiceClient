@@ -10,7 +10,7 @@ var helper = new Helper();
 
 let TimeOut = 30;
 
-// helper.TestAgainst = Helper.TEST_AGAINST__DEPLOYED;
+helper.TestAgainst = Helper.TEST_AGAINST__DEPLOYED;
 
 describe('Test Ping Pong', function ()
 {

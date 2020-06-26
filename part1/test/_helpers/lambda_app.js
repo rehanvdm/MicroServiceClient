@@ -123,9 +123,9 @@ class Helper
     }
 }
 
-Helper.API_URL = "https://mz7zlecpcc.execute-api.us-east-1.amazonaws.com/prod";
+Helper.API_URL = "https://mtvu79n074.execute-api.us-east-1.amazonaws.com/prod";
 Helper.DYNAMO_TABLE = "MicroServiceClient-table";
-Helper.AWS_PROFILE_MAME = "rehan";
+Helper.AWS_PROFILE_MAME = "rehan-demo";
 Helper.AWS_PROFILE_REGION = "us-east-1";
 
 Helper.TEST_AGAINST__DEVELOPMENT = TEST_AGAINST__DEVELOPMENT;
