@@ -1,5 +1,5 @@
 const ApiBaseClass = require('./ApiBaseClass');
-const LambdaResponse = require('../helpers/lambda_response');
+const LambdaResponse = require('../_common/helpers/lambda_response');
 
 class PingPong extends ApiBaseClass
 {

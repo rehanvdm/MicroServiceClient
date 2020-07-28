@@ -10,7 +10,7 @@ var helper = new Helper();
 
 let TimeOut = 30;
 
-// helper.TestAgainst = Helper.TEST_AGAINST__DEPLOYED;
+helper.TestAgainst = Helper.TEST_AGAINST__DEPLOYED;
 
 describe('Test Client - Positive', function ()
 {
@@ -30,7 +30,7 @@ describe('Test Client - Positive', function ()
         let body = {
             "control": { },
             "data": {
-                "name": "AWESOME CLIENT",
+                "name": "AWESOME CLIENT no 5",
             }
         };
 

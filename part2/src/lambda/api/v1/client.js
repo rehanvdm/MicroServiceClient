@@ -1,22 +1,27 @@
 const moment = require('moment');
 const { v4: uuidv4 } = require('uuid');
 
-const LambdaError = require('../helpers/lambda_errors');
-const LambdaLog = require('../helpers/lambda_log');
+const LambdaError = require('../_common/helpers/lambda_errors');
+const LambdaLog = require('../_common/helpers/lambda_log');
 const logger = new LambdaLog();
 
-const client = require('../data_schema/client.js');
-const DynamoClient = require('../dynamo/Client.js');
+const client = require('../_common/data_schema/client.js');
+const DynamoClient = require('../_common/dynamo/Client.js');
+
+const ClientEventsV1 = require('../_common/event_bridge/client-events-v1');
 
 const ApiBaseClass = require('./ApiBaseClass');
 class Client extends ApiBaseClass
 {
-    constructor(aws)
+    constructor(aws, awsXray)
     {
         super();
 
         this.dynamo = new aws.DynamoDB({apiVersion: '2012-08-10', maxRetries: 6, retryDelayOptions: { base: 50} });
+        this.eventbridge = new aws.EventBridge();
+
         this.dynClient = new DynamoClient(this.dynamo, process.env.DYNAMO_TABLE);
+        this.clientEventsV1 = new ClientEventsV1(this.eventbridge, awsXray, "default");
     }
 
     async create(authUser, body)
@@ -29,23 +34,12 @@ class Client extends ApiBaseClass
 
         await this.dynClient.Put(newClient);
 
+        await this.clientEventsV1.client_created(newClient.client_id, newClient.name);
+
         return this.MethodReturn(newClient);
     };
 
-    async increment_person_count(authUser, body)
-    {
-        if(!body.data.client_id)
-            throw new LambdaError.ValidationError("Field: client_id is required");
 
-        let ret = await this.dynClient.IncrementPersonCount(body.data.client_id)
-                        .catch(err =>
-                        {
-                            if(err.code === "ConditionalCheckFailedException")
-                                throw new LambdaError.HandledError("Client does not exist");
-                        })
-
-        return this.MethodReturn(true);
-    };
 
     async find(authUser, body)
     {

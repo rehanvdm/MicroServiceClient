@@ -7,7 +7,10 @@ import logs = require('@aws-cdk/aws-logs');
 import cloudwatch = require('@aws-cdk/aws-cloudwatch');
 import sns = require('@aws-cdk/aws-sns');
 import cloudwatchactions = require('@aws-cdk/aws-cloudwatch-actions');
-
+import iam = require('@aws-cdk/aws-iam');
+import events = require('@aws-cdk/aws-events');
+import events_targets = require('@aws-cdk/aws-events-targets');
+import * as sqs from '@aws-cdk/aws-sqs';
 
 export class MicroServiceClientStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps)
@@ -52,6 +55,49 @@ export class MicroServiceClientStack extends cdk.Stack {
                       tracing: lambda.Tracing.ACTIVE
                     });
     dynTable.grantReadWriteData(apiLambda);
+
+    let eventPolicy = new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      resources: ['*'], /* We want to use the default bus without having to lookup the ARN, so just using * for now, please specify for production implementations */
+      actions: ['events:PutEvents']
+    });
+    apiLambda.addToRolePolicy(eventPolicy);
+
+
+    /* Lambda that receives person_created events and increments internal counter */
+    let processDlq = new sqs.Queue(this, id+'-process-dlq');
+    let processLambda = new lambda.Function(this, id+"-process-lambda", {
+                          functionName:  id+"-process-lambda",
+                          code: new lambda.AssetCode('./src/lambda/process/'),
+                          handler: 'app.handler',
+                          runtime: lambda.Runtime.NODEJS_12_X,
+                          timeout: cdk.Duration.seconds(lambdaTimeout),
+                          environment: {
+                              ENVIRONMENT: environment,
+                              VERSION: "1.0.0",
+                              BUILD: "1",
+                              TIMEOUT: ""+lambdaTimeout,
+
+                              ENABLE_CHAOS: "false",
+                              INJECT_ERROR: "true",
+                              INJECT_LATENCY: "5000",
+
+                              DYNAMO_TABLE: dynTable.tableName
+                          },
+                          tracing: lambda.Tracing.ACTIVE,
+                          deadLetterQueue: processDlq,
+                          deadLetterQueueEnabled: true
+                        });
+
+    dynTable.grantReadWriteData(processLambda);
+    const personRule = new events.Rule(this, id+"-person-created-rule", {
+                          description: 'Only person created events',
+                          eventPattern: {
+                              source: [{ prefix: "microservice.person.prod" }] as any[],
+                              detailType: ["person_created"]
+                          }
+                        });
+    personRule.addTarget(new events_targets.LambdaFunction(processLambda));
 
     let apiName = id;
     let api = new apigateway.RestApi(this, id+"-api", {
@@ -182,6 +228,20 @@ export class MicroServiceClientStack extends cdk.Stack {
     apiLambdaAlarmHardError.addAlarmAction(cwAlarmAction);
     apiLambdaAlarmHardError.addOkAction(cwAlarmAction);
 
+    let processLambdaAlarmHardError = new cloudwatch.Alarm(this, id+"ProcessHardErrorAlarm", {
+      metric: processLambda.metricErrors(),
+      actionsEnabled: true,
+      alarmName: MetricToAlarmName(processLambda.metricErrors()),
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      threshold: 1,
+      period: cdk.Duration.minutes(1),
+      evaluationPeriods: 1,
+      statistic: "Sum",
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING
+    });
+    processLambdaAlarmHardError.addAlarmAction(cwAlarmAction);
+    processLambdaAlarmHardError.addOkAction(cwAlarmAction);
+
     let apiMetricCount =  new cloudwatch.Metric({
       namespace: "AWS/ApiGateway",
       metricName:'Count',
@@ -226,6 +286,12 @@ export class MicroServiceClientStack extends cdk.Stack {
                       metricName:'Errors',
                       dimensions: { FunctionName: apiLambda.functionName },
                       statistic: "Sum",
+                  }),new cloudwatch.Metric({
+                      label: 'api',
+                      namespace: "AWS/Lambda",
+                      metricName:'Errors',
+                      dimensions: { FunctionName: processLambda.functionName },
+                      statistic: "Sum",
                   }),
               ]}),
           new cloudwatch.GraphWidget({
@@ -243,6 +309,20 @@ export class MicroServiceClientStack extends cdk.Stack {
                       namespace: "AWS/Lambda",
                       metricName:'ConcurrentExecutions',
                       dimensions: { FunctionName: apiLambda.functionName },
+                      statistic: "Maximum",
+                  }),
+                  new cloudwatch.Metric({
+                      label: 'process - Invocations',
+                      namespace: "AWS/Lambda",
+                      metricName:'Invocations',
+                      dimensions: { FunctionName: processLambda.functionName },
+                      statistic: "Sum",
+                  }),
+                  new cloudwatch.Metric({
+                      label: 'process - ConcurrentExecutions',
+                      namespace: "AWS/Lambda",
+                      metricName:'ConcurrentExecutions',
+                      dimensions: { FunctionName: processLambda.functionName },
                       statistic: "Maximum",
                   }),
               ],
@@ -269,6 +349,27 @@ export class MicroServiceClientStack extends cdk.Stack {
                       namespace: "AWS/Lambda",
                       metricName:'Duration',
                       dimensions: { FunctionName: apiLambda.functionName },
+                      statistic: "Maximum"
+                  }),
+                  new cloudwatch.Metric({
+                      label: "process - p95",
+                      namespace: "AWS/Lambda",
+                      metricName:'Duration',
+                      dimensions: { FunctionName: processLambda.functionName },
+                      statistic: "p95"
+                  }),
+                  new cloudwatch.Metric({
+                      label: "process - avg",
+                      namespace: "AWS/Lambda",
+                      metricName:'Duration',
+                      dimensions: { FunctionName: processLambda.functionName },
+                      statistic: "Average"
+                  }),
+                  new cloudwatch.Metric({
+                      label: "process - max",
+                      namespace: "AWS/Lambda",
+                      metricName:'Duration',
+                      dimensions: { FunctionName: processLambda.functionName },
                       statistic: "Maximum"
                   }),
               ],
@@ -340,7 +441,7 @@ export class MicroServiceClientStack extends cdk.Stack {
 
 
     dashboard.addWidgets(new cloudwatch.TextWidget({
-      markdown: '# Dynamo',
+      markdown: '# Dynamo & SQS',
       width: 24
     }));
     dashboard.addWidgets(
@@ -364,8 +465,28 @@ export class MicroServiceClientStack extends cdk.Stack {
                   }),
               ],
           }),
+          new cloudwatch.GraphWidget({
+              title: "DLQ Messages",
+              left: [
+                  new cloudwatch.Metric({
+                      label: 'Visible',
+                      namespace: "AWS/SQS",
+                      metricName:'ApproximateNumberOfMessagesVisible',
+                      dimensions: { QueueName: processDlq.queueName },
+                      statistic: "Sum",
+                  }),
+                  new cloudwatch.Metric({
+                      label: 'NOT Visible',
+                      namespace: "AWS/SQS",
+                      metricName:'ApproximateNumberOfMessagesNotVisible',
+                      dimensions: { QueueName: processDlq.queueName },
+                      statistic: "Sum",
+                  }),
+              ],
+          }),
       )
     );
+
 
   }
 }

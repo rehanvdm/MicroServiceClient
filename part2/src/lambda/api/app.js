@@ -1,7 +1,7 @@
-const LambdaEvents = require('./helpers/lambda_events');
-const LambdaResponse = require('./helpers/lambda_response');
-const LambdaLog = require('./helpers/lambda_log');
-const LambdaError = require('./helpers/lambda_errors');
+const LambdaEvents = require('./_common/helpers/lambda_events');
+const LambdaResponse = require('./_common/helpers/lambda_response');
+const LambdaLog = require('./_common/helpers/lambda_log');
+const LambdaError = require('./_common/helpers/lambda_errors');
 
 const moment = require('moment');
 const awsXray = require('aws-xray-sdk-core');
@@ -11,7 +11,7 @@ const aws =  awsXray.captureAWS(require('aws-sdk'));
 // awsXray.captureHTTPsGlobal(require('https'));
 aws.config.region = 'us-east-1';
 
-const audit_log = require('./data_schema/audit_log');
+const audit_log = require('./_common/data_schema/audit_log');
 
 const logger = new LambdaLog();
 logger.init(process.env.ENVIRONMENT);
